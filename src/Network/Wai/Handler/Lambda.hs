@@ -17,6 +17,8 @@ import UnliftIO
 import Text.Read (readMaybe)
 import qualified Data.Binary.Builder as Binary
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as Aeson.KeyMap
+import qualified Data.Aeson.Key as Aeson.Key
 import qualified Data.Aeson.Internal as Aeson
 import qualified Data.Aeson.Parser as Aeson
 import qualified Data.Aeson.Parser.Internal as Aeson
@@ -25,8 +27,8 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.CaseInsensitive as CI
-import qualified Data.HashMap.Strict as HMap
 import qualified Data.IP as IP
+import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Vault.Lazy as Vault
@@ -217,10 +219,10 @@ parseRequest = Aeson.withObject "request" $ \obj -> do
     --  },
     -- XXX: default to empty object for the query params as Lambda doesn't set
     -- 'queryStringParameters' if there are no query parameters
-    queryParams <- obj .:? "queryStringParameters" .!= Aeson.Object HMap.empty >>=
+    queryParams <- obj .:? "queryStringParameters" .!= Aeson.Object Aeson.KeyMap.empty >>=
       Aeson.withObject "queryParams" (
         fmap
-          (fmap (first T.encodeUtf8) . HMap.toList ) .
+          (fmap (first T.encodeUtf8) . Map.toList . Aeson.KeyMap.toMapText) .
           traverse (Aeson.withText "queryParam" (pure . T.encodeUtf8))
       )
 
@@ -240,7 +242,7 @@ parseRequest = Aeson.withObject "request" $ \obj -> do
     requestHeaders <- obj .: "headers" >>=
       Aeson.withObject "headers" (
         fmap
-          (fmap (first (CI.mk . T.encodeUtf8)) . HMap.toList) .
+          (fmap (first (CI.mk . T.encodeUtf8)) . Map.toList . Aeson.KeyMap.toMapText) .
           traverse (Aeson.withText "header" (pure . T.encodeUtf8))
       )
 
@@ -261,7 +263,7 @@ parseRequest = Aeson.withObject "request" $ \obj -> do
       Aeson.withObject "requestContext" (\obj' ->
         obj' .: "identity" >>=
           Aeson.withObject "identity" (\idt -> do
-              sourceIp <- case HMap.lookup "sourceIp" idt of
+              sourceIp <- case Aeson.KeyMap.lookup "sourceIp" idt of
                 Nothing -> fail "no sourceIp"
                 Just (Aeson.String x) -> pure $ T.unpack x
                 Just _ -> fail "bad type for sourceIp"
@@ -329,10 +331,10 @@ readResponse (Wai.responseToStream -> (st, hdrs, mkBody)) = do
 -- | Make an API Gateway response from status, headers and body.
 -- https://docs.aws.amazon.com/lambda/latest/dg/eventsources.html#eventsources-api-gateway-response
 toJSONResponse :: H.Status -> H.ResponseHeaders -> BS.ByteString -> Aeson.Object
-toJSONResponse st hdrs body = HMap.fromList
+toJSONResponse st hdrs body = Aeson.KeyMap.fromList
     [ ("statusCode", Aeson.Number (fromIntegral (H.statusCode st)))
-    , ("headers", Aeson.toJSON $ HMap.fromList $
-        (bimap T.decodeUtf8 T.decodeUtf8 . first CI.original) <$> hdrs)
+    , ("headers", Aeson.toJSON $ Aeson.KeyMap.fromList $
+        (bimap (Aeson.Key.fromText . T.decodeUtf8) T.decodeUtf8 . first CI.original) <$> hdrs)
     , ("body", Aeson.String (T.decodeUtf8 body))
     ]
 
